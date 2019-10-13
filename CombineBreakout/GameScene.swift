@@ -21,20 +21,25 @@ typealias InputSubject = CurrentValueSubject<NSEvent?, Never>
 enum GameEngine {
     static func start(in scene: SKScene, inputSubject: InputSubject) -> AnyPublisher<[Sprite], Never> {
         let ballStartPosition = CGPoint(x: scene.frame.size.width / 2.0, y: scene.frame.size.height / 2.0)
-        let northEast = CGPoint(x: -1.0, y:  1.0)
-        let northWest = CGPoint(x:  1.0, y:  1.0)
-        let southEast = CGPoint(x: -1.0, y: -1.0)
-        let southWest = CGPoint(x:  1.0, y: -1.0)
+        let northEast = CGPoint(x:  1.0, y:  1.0)
+        let northWest = CGPoint(x: -1.0, y:  1.0)
+        let southEast = CGPoint(x:  1.0, y: -1.0)
+        let southWest = CGPoint(x: -1.0, y: -1.0)
         
-        var ballPosition = ballStartPosition
-        var ballDirection = southEast
+        var currentBallPosition = ballStartPosition
+        var ballDirection = southWest
         var ballSpeed: CGFloat = 1.0
+        
+        let paddleWidth = CGFloat(100.0)
+        let paddleSize = CGSize(width: paddleWidth, height: 10.0)
+        let ballSize = CGSize(width: 10.0, height: 10.0)
         
         var lastUpdate = Date()
         
         return Timer.publish(every: 1.0/60.0, on: RunLoop.current, in: .default)
             .autoconnect()
             .combineLatest(inputSubject, { (date, event) -> (Date, CGFloat) in
+                // handle input events
                 if let event = event {
                     let point = event.location(in: scene)
                     let posx = point.x
@@ -43,26 +48,72 @@ enum GameEngine {
                 }
                 return (date, 0.0)
             })
-            .map({ (state) -> [Sprite] in
-                let date = state.0
-                let posx = state.1
+            .map({(state) -> (CGPoint, CGPoint) in
+                // calculate positions
+                let (date, posx) = state
                 
                 // update ball
-                let ballSprite = Sprite(position: ballPosition, size: CGSize(width: 10.0, height: 10.0))
                 let scale = CGAffineTransform(scaleX: ballSpeed, y: ballSpeed)
                 let speed = ballDirection.applying(scale)
                 let translate = CGAffineTransform(translationX: speed.x, y: speed.y)
-                ballPosition = ballPosition.applying(translate)
+                let ballPosition = currentBallPosition.applying(translate)
                 
                 // update paddle
-                let paddleWidth = CGFloat(100.0)
-                let halfPaddleWidth = paddleWidth / 2.0
-                let clippedXPos = min(max(posx - halfPaddleWidth, 0.0), scene.frame.width - paddleWidth)
-                let paddlePosition = CGPoint(x: clippedXPos, y: 0.0)
-                let paddleSprite = Sprite(position: paddlePosition, size: CGSize(width: paddleWidth, height: 10.0))
+                let paddlePosition = CGPoint(x: posx, y: 0.0)
+                
+                if date == lastUpdate {
+                    return (currentBallPosition, paddlePosition)
+                }
                 
                 // update date
                 lastUpdate = date
+                
+                return (ballPosition, paddlePosition)
+            })
+            .map({(state) -> (CGPoint, CGPoint) in
+                // check for collisions
+                var (ballPosition, paddlePosition) = state
+                
+                // paddle-edge collisions
+                let halfPaddleWidth = paddleWidth / 2.0
+                let clippedXPos = min(max(paddlePosition.x - halfPaddleWidth, 0.0), scene.frame.width - paddleWidth)
+                let clippedPaddlePosition = CGPoint(x: clippedXPos, y: 0.0)
+                
+                // ball-edge collisions
+                var newDirection: CGPoint? = nil
+                if ballPosition.x < 0 {
+                    ballPosition = currentBallPosition
+                    newDirection = ballDirection == southWest ? southEast : northEast
+                } else if ballPosition.x > scene.frame.width - ballSize.width {
+                    ballPosition = currentBallPosition
+                    newDirection = ballDirection == southEast ? southWest : northWest
+                }
+                if ballPosition.y < 0 {
+                    ballPosition = currentBallPosition
+                    newDirection = ballDirection == southWest ? northWest : northEast
+                } else if ballPosition.y > scene.frame.height - ballSize.height {
+                    ballPosition = currentBallPosition
+                    newDirection = ballDirection == northWest ? southWest : southEast
+                }
+                
+                // ball-paddle collisions
+                let paddleRect = CGRect(origin: paddlePosition, size: paddleSize)
+                let ballRect = CGRect(origin: ballPosition, size: ballSize)
+                if ballRect.intersects(paddleRect) {
+                    newDirection = ballDirection == southWest ? northEast : northWest
+                }
+                
+                ballDirection = newDirection ?? ballDirection
+                
+                return (ballPosition, clippedPaddlePosition)
+            })
+            .map({ (state) -> [Sprite] in
+                // render sprites
+                let (ballPosition, paddlePosition) = state
+                currentBallPosition = ballPosition
+                
+                let ballSprite = Sprite(position: ballPosition, size: ballSize)
+                let paddleSprite = Sprite(position: paddlePosition, size: paddleSize)
                 
                 return [ballSprite, paddleSprite]
             })
