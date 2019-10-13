@@ -8,83 +8,104 @@
 
 import SpriteKit
 import GameplayKit
+import Combine
+
+struct Sprite {
+    var position = CGPoint.zero
+    var size = CGSize.zero
+    var color = NSColor.white
+}
+
+typealias InputSubject = CurrentValueSubject<NSEvent?, Never>
+
+enum GameEngine {
+    static func start(in scene: SKScene, inputSubject: InputSubject) -> AnyPublisher<[Sprite], Never> {
+        let ballStartPosition = CGPoint(x: scene.frame.size.width / 2.0, y: scene.frame.size.height / 2.0)
+        let northEast = CGPoint(x: -1.0, y:  1.0)
+        let northWest = CGPoint(x:  1.0, y:  1.0)
+        let southEast = CGPoint(x: -1.0, y: -1.0)
+        let southWest = CGPoint(x:  1.0, y: -1.0)
+        
+        var ballPosition = ballStartPosition
+        var ballDirection = southEast
+        var ballSpeed: CGFloat = 1.0
+        
+        var lastUpdate = Date()
+        
+        return Timer.publish(every: 1.0/60.0, on: RunLoop.current, in: .default)
+            .autoconnect()
+            .combineLatest(inputSubject, { (date, event) -> (Date, CGFloat) in
+                if let event = event {
+                    let point = event.location(in: scene)
+                    let posx = point.x
+                    print("X: \(posx)")
+                    return (date, posx)
+                }
+                return (date, 0.0)
+            })
+            .map({ (state) -> [Sprite] in
+                let date = state.0
+                let posx = state.1
+                
+                // update ball
+                let ballSprite = Sprite(position: ballPosition, size: CGSize(width: 10.0, height: 10.0))
+                let scale = CGAffineTransform(scaleX: ballSpeed, y: ballSpeed)
+                let speed = ballDirection.applying(scale)
+                let translate = CGAffineTransform(translationX: speed.x, y: speed.y)
+                ballPosition = ballPosition.applying(translate)
+                
+                // update paddle
+                let paddleWidth = CGFloat(100.0)
+                let halfPaddleWidth = paddleWidth / 2.0
+                let clippedXPos = min(max(posx - halfPaddleWidth, 0.0), scene.frame.width - paddleWidth)
+                let paddlePosition = CGPoint(x: clippedXPos, y: 0.0)
+                let paddleSprite = Sprite(position: paddlePosition, size: CGSize(width: paddleWidth, height: 10.0))
+                
+                // update date
+                lastUpdate = date
+                
+                return [ballSprite, paddleSprite]
+            })
+            .eraseToAnyPublisher()
+    }
+}
+
+class Renderer {
+    func render(sprites: [Sprite], in scene: SKScene) {
+        scene.removeAllChildren()
+        for sprite in sprites {
+            let rect = CGRect(origin: sprite.position, size: sprite.size)
+            let node = SKShapeNode(rect: rect)
+            node.fillColor = sprite.color
+            scene.addChild(node)
+        }
+    }
+}
 
 class GameScene: SKScene {
     
-    private var label : SKLabelNode?
-    private var spinnyNode : SKShapeNode?
+    private var cancellable: Cancellable? = nil
+    private var inputSubject = InputSubject(nil)
+    private let renderer = Renderer()
     
     override func didMove(to view: SKView) {
-        
-        // Get label node from scene and store it for use later
-        self.label = self.childNode(withName: "//helloLabel") as? SKLabelNode
-        if let label = self.label {
-            label.alpha = 0.0
-            label.run(SKAction.fadeIn(withDuration: 2.0))
-        }
-        
-        // Create shape node to use during mouse interaction
-        let w = (self.size.width + self.size.height) * 0.05
-        self.spinnyNode = SKShapeNode.init(rectOf: CGSize.init(width: w, height: w), cornerRadius: w * 0.3)
-        
-        if let spinnyNode = self.spinnyNode {
-            spinnyNode.lineWidth = 2.5
-            
-            spinnyNode.run(SKAction.repeatForever(SKAction.rotate(byAngle: CGFloat(Double.pi), duration: 1)))
-            spinnyNode.run(SKAction.sequence([SKAction.wait(forDuration: 0.5),
-                                              SKAction.fadeOut(withDuration: 0.5),
-                                              SKAction.removeFromParent()]))
-        }
-    }
-    
-    
-    func touchDown(atPoint pos : CGPoint) {
-        if let n = self.spinnyNode?.copy() as! SKShapeNode? {
-            n.position = pos
-            n.strokeColor = SKColor.green
-            self.addChild(n)
-        }
-    }
-    
-    func touchMoved(toPoint pos : CGPoint) {
-        if let n = self.spinnyNode?.copy() as! SKShapeNode? {
-            n.position = pos
-            n.strokeColor = SKColor.blue
-            self.addChild(n)
-        }
-    }
-    
-    func touchUp(atPoint pos : CGPoint) {
-        if let n = self.spinnyNode?.copy() as! SKShapeNode? {
-            n.position = pos
-            n.strokeColor = SKColor.red
-            self.addChild(n)
+        self.cancellable = GameEngine.start(in: self, inputSubject: self.inputSubject)
+            .sink { (sprites) in
+                self.renderer.render(sprites: sprites, in: self)
         }
     }
     
     override func mouseDown(with event: NSEvent) {
-        self.touchDown(atPoint: event.location(in: self))
+        inputSubject.send(event)
     }
     
-    override func mouseDragged(with event: NSEvent) {
-        self.touchMoved(toPoint: event.location(in: self))
+    override func mouseMoved(with event: NSEvent) {
+        inputSubject.send(event)
     }
     
     override func mouseUp(with event: NSEvent) {
-        self.touchUp(atPoint: event.location(in: self))
+        inputSubject.send(event)
     }
-    
-    override func keyDown(with event: NSEvent) {
-        switch event.keyCode {
-        case 0x31:
-            if let label = self.label {
-                label.run(SKAction.init(named: "Pulse")!, withKey: "fadeInOut")
-            }
-        default:
-            print("keyDown: \(event.characters!) keyCode: \(event.keyCode)")
-        }
-    }
-    
     
     override func update(_ currentTime: TimeInterval) {
         // Called before each frame is rendered

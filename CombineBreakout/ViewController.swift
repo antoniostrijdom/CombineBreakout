@@ -17,20 +17,26 @@ class ViewController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        if let view = self.skView {
-            // Load the SKScene from 'GameScene.sks'
-            if let scene = SKScene(fileNamed: "GameScene") {
-                // Set the scale mode to scale to fit the window
-                scene.scaleMode = .aspectFill
+        if let sceneView = self.skView {
+            // Create the scene
+            let sceneSize = CGSize(width: 640, height: 480)
+            let sceneFrame = CGRect(x:0 , y:0, width: sceneSize.width, height: sceneSize.height)
+            let options = NSTrackingArea.Options([NSTrackingArea.Options.mouseMoved,
+                                                  NSTrackingArea.Options.activeInKeyWindow,
+                                                  NSTrackingArea.Options.activeAlways,
+                                                  NSTrackingArea.Options.inVisibleRect])
+            let trackingArea = NSTrackingArea(rect: sceneFrame, options: options, owner: sceneView, userInfo: nil)
+            sceneView.addTrackingArea(trackingArea)
+            let scene = GameScene(size: sceneSize)
+            
+            // Set the scale mode to scale to fit the window
+            scene.scaleMode = .aspectFill
                 
-                // Present the scene
-                view.presentScene(scene)
-            }
-            
-            view.ignoresSiblingOrder = true
-            
-            view.showsFPS = true
-            view.showsNodeCount = true
+            // Present the scene
+            sceneView.presentScene(scene)
+            sceneView.ignoresSiblingOrder = true
+            sceneView.showsFPS = true
+            sceneView.showsNodeCount = true
         }
     }
 }
