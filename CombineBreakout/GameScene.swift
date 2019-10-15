@@ -16,6 +16,12 @@ struct Sprite {
     var color = NSColor.white
 }
 
+struct Brick {
+    let row: Int
+    let column: Int
+    let color: NSColor
+}
+
 typealias InputSubject = CurrentValueSubject<NSEvent?, Never>
 
 enum GameEngine {
@@ -33,6 +39,17 @@ enum GameEngine {
         let paddleWidth = CGFloat(100.0)
         let paddleSize = CGSize(width: paddleWidth, height: 10.0)
         let ballSize = CGSize(width: 10.0, height: 10.0)
+        
+        let brickSize = CGSize(width: 100.0, height: 20.0)
+        let startingBricks = [
+        Brick(row: 0, column: 0, color: .red), Brick(row: 0, column: 1, color: .green), Brick(row: 0, column: 2, color: .blue),
+        Brick(row: 0, column: 3, color: .red), Brick(row: 0, column: 4, color: .green), Brick(row: 0, column: 5, color: .blue),
+        Brick(row: 1, column: 0, color: .blue), Brick(row: 1, column: 1, color: .red), Brick(row: 1, column: 2, color: .green),
+        Brick(row: 1, column: 3, color: .blue), Brick(row: 1, column: 4, color: .red), Brick(row: 1, column: 5, color: .green),
+        Brick(row: 2, column: 0, color: .green), Brick(row: 2, column: 1, color: .blue), Brick(row: 2, column: 2, color: .red),
+        Brick(row: 2, column: 3, color: .green), Brick(row: 2, column: 4, color: .blue), Brick(row: 2, column: 5, color: .red),
+        ]
+        var bricks = startingBricks
         
         var lastUpdate = Date()
         
@@ -103,6 +120,27 @@ enum GameEngine {
                     newDirection = ballDirection == southWest ? northEast : northWest
                 }
                 
+                // ball-brick collisions
+                var hits = [Int]()
+                let center = scene.frame.width / 2.0
+                let starty = scene.frame.height - brickSize.height - brickSize.height
+                for (index, brick) in bricks.enumerated() {
+                    let columnCount = startingBricks.reduce(0) { $0 + ($1.row == brick.row ? 1 : 0) }
+                    let columnWidth = CGFloat(columnCount) * brickSize.width
+                    let startx = center - (columnWidth / 2.0)
+                    let position = CGPoint(x: startx + (CGFloat(brick.column) * brickSize.width),
+                                           y: starty - (CGFloat(brick.row) * brickSize.height))
+                    let brickRect = CGRect(origin: position, size: brickSize)
+                    if ballRect.intersects(brickRect) {
+                        hits.append(index)
+                    }
+                }
+                for index in hits {
+                    newDirection = ballDirection == northWest ? southWest : southEast
+                    ballSpeed = ballSpeed + 1.0
+                    bricks.remove(at: index)
+                }
+                
                 ballDirection = newDirection ?? ballDirection
                 
                 return (ballPosition, clippedPaddlePosition)
@@ -114,8 +152,21 @@ enum GameEngine {
                 
                 let ballSprite = Sprite(position: ballPosition, size: ballSize)
                 let paddleSprite = Sprite(position: paddlePosition, size: paddleSize)
+                var sprites = [ballSprite, paddleSprite]
                 
-                return [ballSprite, paddleSprite]
+                let center = scene.frame.width / 2.0
+                let starty = scene.frame.height - brickSize.height - brickSize.height
+                for brick in bricks {
+                    let columnCount = startingBricks.reduce(0) { $1.column > $0 ? $1.column : $0 } + 1
+                    let columnWidth = CGFloat(columnCount) * brickSize.width
+                    let startx = center - (columnWidth / 2.0)
+                    let position = CGPoint(x: startx + (CGFloat(brick.column) * brickSize.width),
+                                           y: starty - (CGFloat(brick.row) * brickSize.height))
+                    let brickSprite = Sprite(position: position, size: brickSize, color: brick.color)
+                    sprites.append(brickSprite)
+                }
+                
+                return sprites
             })
             .eraseToAnyPublisher()
     }
