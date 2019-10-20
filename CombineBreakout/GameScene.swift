@@ -22,10 +22,14 @@ struct Brick {
     let color: NSColor
 }
 
-typealias InputSubject = CurrentValueSubject<NSEvent?, Never>
+enum GameError: Error {
+    case GameOver
+}
+
+typealias InputSubject = CurrentValueSubject<NSEvent?, GameError>
 
 enum GameEngine {
-    static func start(in scene: SKScene, inputSubject: InputSubject) -> AnyPublisher<[Sprite], Never> {
+    static func start(in scene: SKScene, inputSubject: InputSubject) -> AnyPublisher<[Sprite], GameError> {
         let ballStartPosition = CGPoint(x: scene.frame.size.width / 2.0, y: scene.frame.size.height / 2.0)
         let northEast = CGPoint(x:  1.0, y:  1.0)
         let northWest = CGPoint(x: -1.0, y:  1.0)
@@ -53,14 +57,21 @@ enum GameEngine {
         
         var lastUpdate = Date()
         
+        var gameOver = false
+        
         return Timer.publish(every: 1.0/60.0, on: RunLoop.current, in: .default)
             .autoconnect()
+            .setFailureType(to: GameError.self)
             .combineLatest(inputSubject, { (date, event) -> (Date, CGFloat) in
                 // handle input events
                 if let event = event {
+                    if event.type == .keyUp {
+                        if event.keyCode == 12 {
+                            gameOver = true
+                        }
+                    }
                     let point = event.location(in: scene)
                     let posx = point.x
-                    print("X: \(posx)")
                     return (date, posx)
                 }
                 return (date, 0.0)
@@ -106,8 +117,7 @@ enum GameEngine {
                     newDirection = ballDirection == southEast ? southWest : northWest
                 }
                 if ballPosition.y < 0 {
-                    ballPosition = currentBallPosition
-                    newDirection = ballDirection == southWest ? northWest : northEast
+                    gameOver = true
                 } else if ballPosition.y > scene.frame.height - ballSize.height {
                     ballPosition = currentBallPosition
                     newDirection = ballDirection == northWest ? southWest : southEast
@@ -135,7 +145,7 @@ enum GameEngine {
                         hits.append(index)
                     }
                 }
-                for index in hits {
+                for index in hits.reversed() {
                     newDirection = ballDirection == northWest ? southWest : southEast
                     ballSpeed = ballSpeed + 1.0
                     bricks.remove(at: index)
@@ -146,7 +156,7 @@ enum GameEngine {
                 return (ballPosition, clippedPaddlePosition)
             })
             .map({ (state) -> [Sprite] in
-                // render sprites
+                // generate sprites
                 let (ballPosition, paddlePosition) = state
                 currentBallPosition = ballPosition
                 
@@ -168,6 +178,13 @@ enum GameEngine {
                 
                 return sprites
             })
+            .tryMap({ (sprites) throws -> [Sprite] in
+                if gameOver { throw GameError.GameOver }
+                return sprites
+            })
+            .mapError({ (error) -> GameError in
+                return error as! GameError
+            })
             .eraseToAnyPublisher()
     }
 }
@@ -182,6 +199,16 @@ class Renderer {
             scene.addChild(node)
         }
     }
+    
+    func renderGameOver(in scene: SKScene) {
+        scene.removeAllChildren()
+        let node = SKLabelNode(text: "Game Over")
+        let centerX = scene.frame.width / 2.0
+        let centerY = scene.frame.height / 2.0
+        node.position = CGPoint(x: centerX, y: centerY)
+        node.fontColor = NSColor.white
+        scene.addChild(node)
+    }
 }
 
 class GameScene: SKScene {
@@ -192,9 +219,15 @@ class GameScene: SKScene {
     
     override func didMove(to view: SKView) {
         self.cancellable = GameEngine.start(in: self, inputSubject: self.inputSubject)
-            .sink { (sprites) in
+            .sink(receiveCompletion: { (_) in
+                self.renderer.renderGameOver(in: self)
+            }, receiveValue: { (sprites) in
                 self.renderer.render(sprites: sprites, in: self)
-        }
+            })
+    }
+    
+    override func keyUp(with event: NSEvent) {
+        inputSubject.send(event)
     }
     
     override func mouseDown(with event: NSEvent) {
