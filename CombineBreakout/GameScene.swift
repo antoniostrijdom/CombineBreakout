@@ -23,13 +23,13 @@ struct Brick {
 }
 
 enum GameError: Error {
-    case GameOver
+    case GameOver(finalScore: Int)
 }
 
 typealias InputSubject = CurrentValueSubject<NSEvent?, GameError>
 
 enum GameEngine {
-    static func start(in scene: SKScene, inputSubject: InputSubject) -> AnyPublisher<[Sprite], GameError> {
+    static func start(in scene: SKScene, inputSubject: InputSubject) -> AnyPublisher<([Sprite], Int), GameError> {
         let ballStartPosition = CGPoint(x: scene.frame.size.width / 2.0, y: scene.frame.size.height / 2.0)
         let northEast = CGPoint(x:  1.0, y:  1.0)
         let northWest = CGPoint(x: -1.0, y:  1.0)
@@ -57,6 +57,8 @@ enum GameEngine {
         
         var lastUpdate = Date()
         
+        var multiplier = 1
+        var score = 0
         var gameOver = false
         
         return Timer.publish(every: 1.0/60.0, on: RunLoop.current, in: .default)
@@ -148,6 +150,7 @@ enum GameEngine {
                 for index in hits.reversed() {
                     newDirection = ballDirection == northWest ? southWest : southEast
                     ballSpeed = ballSpeed + 1.0
+                    score = score + multiplier
                     bricks.remove(at: index)
                 }
                 
@@ -178,9 +181,9 @@ enum GameEngine {
                 
                 return sprites
             })
-            .tryMap({ (sprites) throws -> [Sprite] in
-                if gameOver { throw GameError.GameOver }
-                return sprites
+            .tryMap({ (sprites) throws -> ([Sprite], Int) in
+                if gameOver { throw GameError.GameOver(finalScore: score) }
+                return (sprites, score)
             })
             .mapError({ (error) -> GameError in
                 return error as! GameError
@@ -190,7 +193,7 @@ enum GameEngine {
 }
 
 class Renderer {
-    func render(sprites: [Sprite], in scene: SKScene) {
+    func render(sprites: [Sprite], score: Int, in scene: SKScene) {
         scene.removeAllChildren()
         for sprite in sprites {
             let rect = CGRect(origin: sprite.position, size: sprite.size)
@@ -198,6 +201,28 @@ class Renderer {
             node.fillColor = sprite.color
             scene.addChild(node)
         }
+        let scoreSprite = SKLabelNode(text: "Score: \(score)")
+        scoreSprite.position = CGPoint(x: 15.0, y: scene.frame.size.height - 10.0)
+        scoreSprite.fontSize = 8
+        scoreSprite.fontColor = NSColor.white
+        scene.addChild(scoreSprite)
+    }
+    
+    func renderTitle(in scene: SKScene) {
+        scene.removeAllChildren()
+        let centerX = scene.frame.width / 2.0
+        let centerY = scene.frame.height / 2.0
+        let title = SKLabelNode(text: "Combine Breakout")
+        title.position = CGPoint(x: centerX, y: centerY)
+        title.fontSize = 20
+        title.fontColor = NSColor.white
+        scene.addChild(title)
+        let subTitle = SKLabelNode(text: "(click to start)")
+        subTitle.position =
+            CGPoint(x: centerX, y: centerY - title.calculateAccumulatedFrame().size.height)
+        subTitle.fontSize = 8
+        subTitle.fontColor = NSColor.white
+        scene.addChild(subTitle)
     }
     
     func renderGameOver(in scene: SKScene) {
@@ -206,8 +231,15 @@ class Renderer {
         let centerX = scene.frame.width / 2.0
         let centerY = scene.frame.height / 2.0
         node.position = CGPoint(x: centerX, y: centerY)
+        node.fontSize = 20
         node.fontColor = NSColor.white
         scene.addChild(node)
+        let subTitle = SKLabelNode(text: "(click to restart)")
+        subTitle.position =
+            CGPoint(x: centerX, y: centerY - node.calculateAccumulatedFrame().size.height)
+        subTitle.fontSize = 8
+        subTitle.fontColor = NSColor.white
+        scene.addChild(subTitle)
     }
 }
 
@@ -218,19 +250,10 @@ class GameScene: SKScene {
     private let renderer = Renderer()
     
     override func didMove(to view: SKView) {
-        self.cancellable = GameEngine.start(in: self, inputSubject: self.inputSubject)
-            .sink(receiveCompletion: { (_) in
-                self.renderer.renderGameOver(in: self)
-            }, receiveValue: { (sprites) in
-                self.renderer.render(sprites: sprites, in: self)
-            })
+        renderer.renderTitle(in: self)
     }
     
     override func keyUp(with event: NSEvent) {
-        inputSubject.send(event)
-    }
-    
-    override func mouseDown(with event: NSEvent) {
         inputSubject.send(event)
     }
     
@@ -239,7 +262,15 @@ class GameScene: SKScene {
     }
     
     override func mouseUp(with event: NSEvent) {
-        inputSubject.send(event)
+        if nil == self.cancellable {
+            self.cancellable = GameEngine.start(in: self, inputSubject: self.inputSubject)
+                .sink(receiveCompletion: { (_) in
+                    self.renderer.renderGameOver(in: self)
+                    self.cancellable = nil
+                }, receiveValue: { (sprites) in
+                    self.renderer.render(sprites: sprites.0, score: sprites.1, in: self)
+                })
+        }
     }
     
     override func update(_ currentTime: TimeInterval) {
