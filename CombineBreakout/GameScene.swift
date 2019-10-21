@@ -38,7 +38,7 @@ enum GameEngine {
         
         var currentBallPosition = ballStartPosition
         var ballDirection = southWest
-        var ballSpeed: CGFloat = 1.0
+        var ballSpeed: CGFloat = 3.0
         
         let paddleWidth = CGFloat(100.0)
         let paddleSize = CGSize(width: paddleWidth, height: 10.0)
@@ -126,10 +126,17 @@ enum GameEngine {
                 }
                 
                 // ball-paddle collisions
-                let paddleRect = CGRect(origin: paddlePosition, size: paddleSize)
+                var leftPaddlePos = paddlePosition
+                leftPaddlePos.x = leftPaddlePos.x - halfPaddleWidth
+                let rightPaddlePos = paddlePosition
+                let halfPaddleSize = CGSize(width: halfPaddleWidth, height: paddleSize.height)
+                let leftPaddleRect = CGRect(origin: leftPaddlePos, size: halfPaddleSize)
+                let rightPaddleRect = CGRect(origin: rightPaddlePos, size: halfPaddleSize)
                 let ballRect = CGRect(origin: ballPosition, size: ballSize)
-                if ballRect.intersects(paddleRect) {
-                    newDirection = ballDirection == southWest ? northEast : northWest
+                if ballRect.intersects(leftPaddleRect) {
+                    newDirection = northWest
+                } else if ballRect.intersects(rightPaddleRect) {
+                    newDirection = northEast
                 }
                 
                 // ball-brick collisions
