@@ -29,7 +29,7 @@ enum GameError: Error {
 typealias InputSubject = CurrentValueSubject<NSEvent?, GameError>
 
 enum GameEngine {
-    static func start(in scene: SKScene, inputSubject: InputSubject) -> AnyPublisher<([Sprite], Int), GameError> {
+    static func start(in scene: SKScene, inputSubject: InputSubject) -> AnyPublisher<([Sprite], Int, Int), GameError> {
         let ballStartPosition = CGPoint(x: scene.frame.size.width / 2.0, y: scene.frame.size.height / 2.0)
         let northEast = CGPoint(x:  1.0, y:  1.0)
         let northWest = CGPoint(x: -1.0, y:  1.0)
@@ -59,6 +59,7 @@ enum GameEngine {
         
         var multiplier = 1
         var score = 0
+        var lives = 3
         var gameOver = false
         
         return Timer.publish(every: 1.0/60.0, on: RunLoop.current, in: .default)
@@ -119,7 +120,15 @@ enum GameEngine {
                     newDirection = ballDirection == southEast ? southWest : northWest
                 }
                 if ballPosition.y < 0 {
-                    gameOver = true
+                    lives = lives - 1
+                    multiplier = 1
+                    if lives <= 0 {
+                        gameOver = true
+                    } else {
+                        ballPosition = ballStartPosition
+                        let interval = Double(lastUpdate.timeIntervalSince1970)
+                        ballDirection = interval.truncatingRemainder(dividingBy: 2.0) == 0.0 ? southEast : southWest
+                    }
                 } else if ballPosition.y > scene.frame.height - ballSize.height {
                     ballPosition = currentBallPosition
                     newDirection = ballDirection == northWest ? southWest : southEast
@@ -156,9 +165,15 @@ enum GameEngine {
                 }
                 for index in hits.reversed() {
                     newDirection = ballDirection == northWest ? southWest : southEast
-                    ballSpeed = ballSpeed + 1.0
                     score = score + multiplier
+                    multiplier = multiplier + 1
                     bricks.remove(at: index)
+                }
+                
+                if bricks.isEmpty {
+                    multiplier = multiplier + 10
+                    ballSpeed = ballSpeed + 1.0
+                    bricks = startingBricks
                 }
                 
                 ballDirection = newDirection ?? ballDirection
@@ -188,9 +203,9 @@ enum GameEngine {
                 
                 return sprites
             })
-            .tryMap({ (sprites) throws -> ([Sprite], Int) in
+            .tryMap({ (sprites) throws -> ([Sprite], Int, Int) in
                 if gameOver { throw GameError.GameOver(finalScore: score) }
-                return (sprites, score)
+                return (sprites, score, lives)
             })
             .mapError({ (error) -> GameError in
                 return error as! GameError
@@ -200,7 +215,7 @@ enum GameEngine {
 }
 
 class Renderer {
-    func render(sprites: [Sprite], score: Int, in scene: SKScene) {
+    func render(sprites: [Sprite], score: Int, lives: Int, in scene: SKScene) {
         scene.removeAllChildren()
         for sprite in sprites {
             let rect = CGRect(origin: sprite.position, size: sprite.size)
@@ -209,10 +224,17 @@ class Renderer {
             scene.addChild(node)
         }
         let scoreSprite = SKLabelNode(text: "Score: \(score)")
-        scoreSprite.position = CGPoint(x: 15.0, y: scene.frame.size.height - 10.0)
+        scoreSprite.position = CGPoint(x: scoreSprite.calculateAccumulatedFrame().size.width / 2.0,
+                                       y: scene.frame.size.height - 10.0)
         scoreSprite.fontSize = 8
         scoreSprite.fontColor = NSColor.white
         scene.addChild(scoreSprite)
+        let livesSprite = SKLabelNode(text: "Lives: \(lives)")
+        livesSprite.position = CGPoint(x: scene.frame.size.width - (livesSprite.calculateAccumulatedFrame().size.width / 2.0),
+                                       y: scene.frame.size.height - 10.0)
+        livesSprite.fontSize = 8
+        livesSprite.fontColor = NSColor.white
+        scene.addChild(livesSprite)
     }
     
     func renderTitle(in scene: SKScene) {
@@ -275,7 +297,10 @@ class GameScene: SKScene {
                     self.renderer.renderGameOver(in: self)
                     self.cancellable = nil
                 }, receiveValue: { (sprites) in
-                    self.renderer.render(sprites: sprites.0, score: sprites.1, in: self)
+                    self.renderer.render(sprites: sprites.0,
+                                         score: sprites.1,
+                                         lives: sprites.2,
+                                         in: self)
                 })
         }
     }
